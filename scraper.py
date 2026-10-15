@@ -15,6 +15,14 @@ def extract_next_links(url, resp):
     #         resp.raw_response.url: the url, again
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
+
+    # This section small section is from Makaden.
+    if resp.status != 200: # If not 200, there is an error fetching the page.
+        print(f"Error occurred while fetching {url}: {resp.error}")
+    else:
+        raw_content = resp.raw_response.content # Raw text of the page (I'm assuming it's a string?). Extract links from here.
+    # I believe after this point, we should be using tokenizing the content on the page for links.
+
     return list()
 
 def is_valid(url):
