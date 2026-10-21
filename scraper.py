@@ -16,12 +16,15 @@ def extract_next_links(url, resp):
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
-    # This small section is from Makaden.
-    if resp.status != 200: # If not 200, there is an error fetching the page.
-        print(f"Error occurred while fetching {url}: {resp.error}")
+    # Only process successful responses that contain a response object.
+    # This avoids accessing .content when the request failed or no response
+    # object is available.
+    if resp.status == 200 and resp.raw_response is not None:
+        raw_content = resp.raw_response.content
     else:
-        raw_content = resp.raw_response.content # Raw text of the page (I'm assuming it's a string?). Extract links from here.
-    # I believe after this point, we should be tokenizing the content on the page for links.
+        if resp.status != 200:
+            print(f"Error occurred while fetching {url}: {resp.error}")
+        return list()
 
     return list()
 
