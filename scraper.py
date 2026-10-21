@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin, urldefrag
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -26,7 +26,23 @@ def extract_next_links(url, resp):
             print(f"Error occurred while fetching {url}: {resp.error}")
         return list()
 
-    return list()
+    # Parse the HTML content so we can locate hyperlinks.
+    soup = BeautifulSoup(raw_content, "html.parser")
+    links = soup.find_all("a", href=True)
+
+    extracted_links = []
+    
+    for link in links:
+        # Convert relative URLs to absolute URLs using the current page's URL.
+        absolute_url = urljoin(resp.url, link["href"])
+
+        # Remove fragments (#section) to avoid treating the same page as different URLs.
+        absolute_url = urldefrag(absolute_url)[0]
+
+        # Add the processed URL to our list.
+        extracted_links.append(absolute_url)
+        
+    return extracted_links
 
 def is_valid(url):
     # Decide whether to crawl this url or not. 
