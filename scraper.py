@@ -1,7 +1,7 @@
 import re
 from collections import Counter
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, urljoin, urldefrag
+from urllib.parse import urlparse, urljoin, urldefrag, parse_qsl
 
 
 STOP_WORDS = {
@@ -170,9 +170,46 @@ def is_valid(url):
         ):
             return False
 
-        # Avoid URLs that would require user login/authentication.
-        if re.match(r"/*\.(auth|login|signin|oauth2)$", parsed.path):
+        # Avoid excessively deep URL paths that may indicate crawler traps.
+        if len([part for part in parsed.path.split("/") if part]) > 10:
             return False
+            
+        # Avoid URLs with excessive query parameters that may indicate crawler traps.
+        if len(parse_qsl(parsed.query, keep_blank_values=True)) > 5:
+            return False
+
+        # Avoid calendar traps caused by endless date navigation.
+        calendar_keywords = {"calendar", "calendars"}
+        
+        if any(part in calendar_keywords for part in parsed.path.lower().split("/")):
+            if re.search(r"/\d{4}/\d{1,2}(?:/|$)", parsed.path):
+                return False
+        
+            if any(key.lower() in {"year", "month", "date"}
+                   for key, value in parse_qsl(parsed.query)):
+                return False
+
+        # Avoid excessive pagination that may indicate a crawler trap.
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+            if key.lower() in {"page", "p", "pg"}:
+                if value.isdigit() and int(value) > 100:
+                    return False
+
+        # Avoid session IDs that may generate endless unique URLs.
+        session_params = {"sessionid", "session_id", "phpsessid", "jsessionid"}
+        
+        if any(key.lower() in session_params
+               for key, value in parse_qsl(parsed.query, keep_blank_values=True)):
+            return False
+
+        # Avoid excessively long URLs that may indicate crawler traps.
+        if len(url) > 2048:
+            return False
+
+        # Avoid URLs that would require user login/authentication.
+        if any(part in {"login", "signin", "auth", "oauth2"}
+            for part in parsed.path.lower().split("/")):
+                return False
 
         # Skip non-HTML files such as images, documents, archives,
         # and other file types that are not useful for our crawler.
@@ -186,10 +223,9 @@ def is_valid(url):
             + r"|thmx|mso|arff|rtf|jar|csv"
             + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower())
 
-    # Handle a TypeError if one occurs inside try.
-    except TypeError:
-        print ("TypeError for ", parsed)
-        raise
+    # Reject malformed URLs instead of interrupting the crawler.
+    except (TypeError, ValueError):
+        return False
 
 
 
