@@ -71,6 +71,15 @@ def is_valid(url):
         ):
             return False
 
+        # Make sure URLs have only valid alphanumeric characters,
+        # forward slashes also acceptable of course.
+        if not re.match(r'^[A-Za-z0-9/]+$', parsed.path()):
+            return False
+
+        # Avoid URLs that would require user login/authentication.
+        if re.match(r"/*\.(auth|login|signin|oauth2)$", parsed.path()):
+            return False
+
          # Skip non-HTML files such as images, documents, archives,
         # and other file types that are not useful for our crawler.
         return not re.match(
