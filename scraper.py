@@ -1,9 +1,83 @@
 import re
+from collections import Counter
+from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin, urldefrag
 
+
+STOP_WORDS = {
+    "a", "about", "above", "after", "again", "against", "all", "am", "an",
+    "and", "any", "are", "aren't", "as", "at", "be", "because", "been",
+    "before", "being", "below", "between", "both", "but", "by", "can't",
+    "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't",
+    "doing", "don't", "down", "during", "each", "few", "for", "from",
+    "further", "had", "hadn't", "has", "hasn't", "have", "haven't",
+    "having", "he", "he'd", "he'll", "he's", "her", "here", "here's",
+    "hers", "herself", "him", "himself", "his", "how", "how's", "i",
+    "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't",
+    "it", "it's", "its", "itself", "let's", "me", "more", "most",
+    "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on",
+    "once", "only", "or", "other", "ought", "our", "ours", "ourselves",
+    "out", "over", "own", "same", "shan't", "she", "she'd", "she'll",
+    "she's", "should", "shouldn't", "so", "some", "such", "than", "that",
+    "that's", "the", "their", "theirs", "them", "themselves", "then",
+    "there", "there's", "these", "they", "they'd", "they'll", "they're",
+    "they've", "this", "those", "through", "to", "too", "under", "until",
+    "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're",
+    "we've", "were", "weren't", "what", "what's", "when", "when's",
+    "where", "where's", "which", "while", "who", "who's", "whom", "why",
+    "why's", "with", "won't", "would", "wouldn't", "you", "you'd",
+    "you'll", "you're", "you've", "your", "yours", "yourself",
+    "yourselves"
+}
+
+page_count = 0
+word_counts = Counter()
+longest_page = ("", 0)
+subdomain_counts = Counter()
+
+
+#
+
 def scraper(url, resp):
+    global page_count, word_counts, longest_page, subdomain_counts
+
     links = extract_next_links(url, resp)
-    return {link for link in links if is_valid(link)}
+
+
+    #Double checks if the page has been downloaded
+    if resp.status == 200 and resp.raw_response is not None:
+        soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+
+        # Remove elements that are not page text
+        for element in soup(["script", "style", "noscript"]):
+            element.decompose()
+
+        text = soup.get_text(" ")
+
+        # Found the below technqiue from: https://4geeks.com/en/how-to/regex-letter. This finds words with uppercase or lowercase.
+        # This version: words = re.findall(r"\b[a-zA-Z]+\b", text.lower()) is the old version that doesn't catch apostrophes.
+        #The a-z text means: Find words made of letters, while allowing an apostrophe inside a word.
+        words = re.findall(r"\b[a-zA-Z]+(?:'[a-zA-Z]+)?\b", text.lower())
+
+        # Count this page
+        page_count += 1
+
+        # Check if this is the longest page
+        word_count = len(words)
+        if word_count > longest_page[1]:
+            longest_page = (resp.url, word_count)
+
+        # Count words, ignoring stop words
+        for word in words:
+            if word not in STOP_WORDS:
+                word_counts[word] += 1
+
+        # Count ics.uci.edu subdomains
+        hostname = urlparse(resp.url).hostname
+        if hostname and hostname.endswith(".ics.uci.edu"):
+            subdomain_counts[hostname] += 1
+
+    return [link for link in links if is_valid(link)]
 
 def extract_next_links(url, resp):
     # Implementation required.
@@ -87,3 +161,23 @@ def is_valid(url):
     except TypeError:
         print ("TypeError for ", parsed)
         raise
+
+
+
+
+def print_statistics():
+    print("\n===== PAGE STATISTICS =====")
+
+    print("Unique pages:", page_count)
+
+    print("\nLongest page:")
+    print("URL:", longest_page[0])
+    print("Word count:", longest_page[1])
+
+    print("\n50 most common words:")
+    for word, count in word_counts.most_common(50):
+        print(word, count)
+
+    print("\nics.uci.edu subdomains:")
+    for subdomain in sorted(subdomain_counts):
+        print(subdomain, subdomain_counts[subdomain])
