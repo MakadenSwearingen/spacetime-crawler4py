@@ -35,6 +35,11 @@ word_counts = Counter()
 longest_page = ("", 0)
 subdomain_counts = Counter()
 
+# Pages no larger than 5 MB.
+MAX_CONTENT_BYTES = 5242880 
+
+# Pages with fewer visible words than MIN_WORD_COUNT will be considered "low-information"
+MIN_WORD_COUNT = 50
 
 #
 
@@ -100,8 +105,27 @@ def extract_next_links(url, resp):
             print(f"Error occurred while fetching {url}: {resp.error}")
         return list()
 
+    # Skip the dead page if the server returned 200 but sent no actual content.
+    if not raw_content or not raw_content.strip():
+        print(f"Skipping dead page (no content): {url}")
+        return list()
+
+    # Skip very large pages before parsing them.
+    if len(raw_content) > MAX_CONTENT_BYTES:
+        print(f"Skipping large page ({len(raw_content)} bytes): {url}") # An ASCII character is 1 byte, hence "len()".
+        return list()
+
     # Parse the HTML content so we can locate hyperlinks.
     soup = BeautifulSoup(raw_content, "html.parser")
+
+    # Skip low-information pages. Only count visible words, so remove <script> and <style> blocks first, since their contents are not text.
+    for tag in soup(["script", "style"]):
+        tag.decompose() # Removes any text between, for example, <script></script>.
+    word_count = len(soup.get_text(separator=" ").split()) # Separates each segment of text with a space, then separates the entire string into a list.
+    if word_count < MIN_WORD_COUNT: # Skip page if the words we found are less than our threshold.
+        print(f"Skipping low-information page ({word_count} words): {url}")
+        return list()
+        
     links = soup.find_all("a", href=True)
 
     extracted_links = []
