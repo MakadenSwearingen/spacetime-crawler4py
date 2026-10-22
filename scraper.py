@@ -77,7 +77,7 @@ def scraper(url, resp):
         if hostname and hostname.endswith(".ics.uci.edu"):
             subdomain_counts[hostname] += 1
 
-    return [link for link in links if is_valid(link)]
+    return {link for link in links if is_valid(link)}
 
 def extract_next_links(url, resp):
     # Implementation required.
