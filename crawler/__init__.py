@@ -21,6 +21,10 @@ class Crawler(object):
         self.start_async()
         self.join()
 
+        # Print page statistics after the crawler finishes
+        import scraper
+        scraper.print_statistics()
+
     def join(self):
         for worker in self.workers:
             worker.join()
