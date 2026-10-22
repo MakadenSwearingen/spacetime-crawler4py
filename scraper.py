@@ -38,20 +38,25 @@ subdomain_counts = Counter()
 # Pages no larger than 5 MB.
 MAX_CONTENT_BYTES = 5242880 
 
-# Pages with fewer visible words than MIN_WORD_COUNT will be considered "low-information"
-MIN_WORD_COUNT = 50
-
-#
 
 def scraper(url, resp):
     global visited_pages, word_counts, longest_page, subdomain_counts
 
-    links = extract_next_links(url, resp)
-
-
-    #Double checks if the page has been downloaded
+    # Only process successfully downloaded pages.
     if resp.status == 200 and resp.raw_response is not None:
-        soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+        raw_content = resp.raw_response.content
+
+        # Skip empty or oversized pages before parsing their HTML.
+        # Since is_valid() validates a URL before the crawler downloads it. 
+        # It cannot know the page's content size because it only receives a URL. 
+        # That why we put it directly in the crawler.
+        if not raw_content or len(raw_content) > MAX_CONTENT_BYTES:
+            return set()
+
+        # Extract links only from valid responses
+        links = extract_next_links(url, resp)
+
+        soup = BeautifulSoup(raw_content, "html.parser")
 
         # Remove elements that are not page text
         for element in soup(["script", "style", "noscript"]):
@@ -83,7 +88,9 @@ def scraper(url, resp):
         if hostname and hostname.endswith(".ics.uci.edu"):
             subdomain_counts[hostname] += 1
 
-    return {link for link in links if is_valid(link)}
+        return {link for link in links if is_valid(link)}
+    
+    return set()
 
 def extract_next_links(url, resp):
     # Implementation required.
@@ -111,21 +118,8 @@ def extract_next_links(url, resp):
         print(f"Skipping dead page (no content): {url}")
         return list()
 
-    # Skip very large pages before parsing them.
-    if len(raw_content) > MAX_CONTENT_BYTES:
-        print(f"Skipping large page ({len(raw_content)} bytes): {url}") # An ASCII character is 1 byte, hence "len()".
-        return list()
-
     # Parse the HTML content so we can locate hyperlinks.
     soup = BeautifulSoup(raw_content, "html.parser")
-
-    # Skip low-information pages. Only count visible words, so remove <script> and <style> blocks first, since their contents are not text.
-    for tag in soup(["script", "style"]):
-        tag.decompose() # Removes any text between, for example, <script></script>.
-    word_count = len(soup.get_text(separator=" ").split()) # Separates each segment of text with a space, then separates the entire string into a list.
-    if word_count < MIN_WORD_COUNT: # Skip page if the words we found are less than our threshold.
-        print(f"Skipping low-information page ({word_count} words): {url}")
-        return list()
         
     links = soup.find_all("a", href=True)
 
@@ -170,26 +164,21 @@ def is_valid(url):
         ):
             return False
 
-        # Make sure URLs have only valid alphanumeric characters,
-        # forward slashes also acceptable of course.
-        if not re.match(r'^[A-Za-z0-9/]+$', parsed.path()):
-            return False
-
         # Avoid URLs that would require user login/authentication.
-        if re.match(r"/*\.(auth|login|signin|oauth2)$", parsed.path()):
+        if re.match(r"/*\.(auth|login|signin|oauth2)$", parsed.path):
             return False
 
-         # Skip non-HTML files such as images, documents, archives,
+        # Skip non-HTML files such as images, documents, archives,
         # and other file types that are not useful for our crawler.
         return not re.match(
-                r".*\.(css|js|bmp|gif|jpe?g|ico"
-                + r"|png|tiff?|mid|mp2|mp3|mp4"
-                + r"|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf"
-                + r"|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names"
-                + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
-                + r"|epub|dll|cnf|tgz|sha1"
-                + r"|thmx|mso|arff|rtf|jar|csv"
-                + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower())
+            r".*\.(css|js|bmp|gif|jpe?g|ico"
+            + r"|png|tiff?|mid|mp2|mp3|mp4"
+            + r"|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf"
+            + r"|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names"
+            + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
+            + r"|epub|dll|cnf|tgz|sha1"
+            + r"|thmx|mso|arff|rtf|jar|csv"
+            + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower())
 
     # Handle a TypeError if one occurs inside try.
     except TypeError:
