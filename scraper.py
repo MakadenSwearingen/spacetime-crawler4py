@@ -30,7 +30,7 @@ STOP_WORDS = {
     "yourselves"
 }
 
-page_count = 0
+visited_pages = set()
 word_counts = Counter()
 longest_page = ("", 0)
 subdomain_counts = Counter()
@@ -44,7 +44,7 @@ MIN_WORD_COUNT = 50
 #
 
 def scraper(url, resp):
-    global page_count, word_counts, longest_page, subdomain_counts
+    global visited_pages, word_counts, longest_page, subdomain_counts
 
     links = extract_next_links(url, resp)
 
@@ -64,8 +64,9 @@ def scraper(url, resp):
         #The a-z text means: Find words made of letters, while allowing an apostrophe inside a word.
         words = re.findall(r"\b[a-zA-Z]+(?:'[a-zA-Z]+)?\b", text.lower())
 
-        # Count this page
-        page_count += 1
+        # Remove fragment and count unique pages
+        page_url = urldefrag(resp.url)[0]
+        visited_pages.add(page_url)
 
         # Check if this is the longest page
         word_count = len(words)
@@ -201,7 +202,7 @@ def is_valid(url):
 def print_statistics():
     print("\n===== PAGE STATISTICS =====")
 
-    print("Unique pages:", page_count)
+    print("Unique pages:", len(visited_pages))
 
     print("\nLongest page:")
     print("URL:", longest_page[0])
