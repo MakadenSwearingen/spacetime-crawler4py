@@ -69,8 +69,14 @@ def scraper(url, resp):
         #The a-z text means: Find words made of letters, while allowing an apostrophe inside a word.
         words = re.findall(r"\b[a-zA-Z]+(?:'[a-zA-Z]+)?\b", text.lower())
 
-        # Remove fragment and count unique pages
+        # Remove URL fragment to identify unique pages
         page_url = urldefrag(resp.url)[0]
+
+        # Skip statistics for pages we've already processed
+        if page_url in visited_pages:
+            return {link for link in links if is_valid(link)}
+
+        # Record this unique page
         visited_pages.add(page_url)
 
         # Check if this is the longest page
