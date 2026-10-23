@@ -4,6 +4,7 @@ from inspect import getsource
 from utils.download import download
 from utils import get_logger
 import scraper
+import socket
 import time
 
 
@@ -23,7 +24,23 @@ class Worker(Thread):
             if not tbd_url:
                 self.logger.info("Frontier is empty. Stopping Crawler.")
                 break
-            resp = download(tbd_url, self.config, self.logger)
+
+            # In case of ConnectionRefusedError, reattempt limited amount of times before excepting gracefully
+            attempts = 0
+            while True:
+                try:    
+                    resp = download(tbd_url, self.config, self.logger)
+                    break
+                    
+                except ConnectionRefusedError:
+                    attempts += 1
+                    if attempts < 5:
+                        time.sleep(0.5) # Politeness
+                        continue
+
+                    else:
+                        raise Exception("Too many reattempts on connection refusal, now terminating.")
+            
             self.logger.info(
                 f"Downloaded {tbd_url}, status <{resp.status}>, "
                 f"using cache {self.config.cache_server}.")
