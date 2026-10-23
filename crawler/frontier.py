@@ -88,10 +88,19 @@ class Frontier(object):
     
     def mark_url_complete(self, url):
         urlhash = get_urlhash(url)
-        if urlhash not in self.save:
-            # This should not happen.
-            self.logger.error(
-                f"Completed url {url}, but have not seen it before.")
 
-        self.save[urlhash] = (url, True)
-        self.save.sync()
+        # Mark the URL as downloaded so it won't be retried on restart.
+        cursor = self.save.execute(
+            """
+            UPDATE frontier
+            SET completed = 1
+            WHERE urlhash = ?
+            """,
+            (urlhash,)
+        )
+        self.save.commit()
+
+        if cursor.rowcount == 0:
+            self.logger.error(
+                f"Completed url {url}, but have not seen it before."
+            )
