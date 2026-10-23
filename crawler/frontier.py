@@ -46,16 +46,20 @@ class Frontier(object):
                     self.add_url(url)
 
     def _parse_save_file(self):
-        ''' This function can be overridden for alternate saving techniques. '''
-        total_count = len(self.save)
-        tbd_count = 0
-        for url, completed in self.save.values():
+        # Load previously discovered URLs from the database.
+        rows = self.save.execute(
+            "SELECT url, completed FROM frontier"
+        ).fetchall()
+        
+        for url, completed in rows:
+            # Only restore URLs that have not been downloaded.
             if not completed and is_valid(url):
                 self.to_be_downloaded.append(url)
-                tbd_count += 1
+                
         self.logger.info(
-            f"Found {tbd_count} urls to be downloaded from {total_count} "
-            f"total urls discovered.")
+            f"Found {len(self.to_be_downloaded)} urls to be "
+            f"downloaded from {len(rows)} total urls discovered."
+        )
 
     def get_tbd_url(self):
         try:
