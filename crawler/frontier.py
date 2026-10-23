@@ -70,9 +70,20 @@ class Frontier(object):
     def add_url(self, url):
         url = normalize(url)
         urlhash = get_urlhash(url)
-        if urlhash not in self.save:
-            self.save[urlhash] = (url, False)
-            self.save.sync()
+        
+        # Insert the URL only if its hash is not already stored.
+        cursor = self.save.execute(
+            """
+            INSERT OR IGNORE INTO frontier
+            (urlhash, url, completed)
+            VALUES (?, ?, 0)
+            """,
+            (urlhash, url)
+        )
+        self.save.commit()
+
+        # Add only newly discovered URLs to the pending list.
+        if cursor.rowcount == 1:
             self.to_be_downloaded.append(url)
     
     def mark_url_complete(self, url):
