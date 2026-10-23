@@ -41,7 +41,13 @@ class Frontier(object):
         else:
             # Set the frontier state with contents of save file.
             self._parse_save_file()
-            if not self.save:
+
+            # If the database is empty, initialize the frontier with seed URLs.
+            count = self.save.execute(
+                "SELECT COUNT(*) FROM frontier"
+            ).fetchone()[0]
+
+            if count == 0:
                 for url in self.config.seed_urls:
                     self.add_url(url)
 
