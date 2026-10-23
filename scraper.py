@@ -184,9 +184,14 @@ def is_valid(url):
         if any(part in calendar_keywords for part in parsed.path.lower().split("/")):
             if re.search(r"/\d{4}/\d{1,2}(?:/|$)", parsed.path):
                 return False
+
+            if re.search(r"/day/\d{4}-\d{2}-\d{2}(?:/|$)", parsed.path):
+                return False
         
-            if any(key.lower() in {"year", "month", "date"}
-                   for key, value in parse_qsl(parsed.query)):
+            if any(key.lower() in  {
+                "year", "month", "date", "tribe-bar-date",
+                "ical", "outlook-ical", "eventdisplay"
+            } for key, value in parse_qsl(parsed.query)):
                 return False
 
         # Avoid excessive pagination that may indicate a crawler trap.
