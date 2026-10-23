@@ -1,5 +1,5 @@
 import os
-import shelve
+import sqlite3
 
 from utils import get_logger, get_urlhash, normalize
 from scraper import is_valid
@@ -9,19 +9,32 @@ class Frontier(object):
         self.logger = get_logger("FRONTIER")
         self.config = config
         self.to_be_downloaded = list()
+
+        # Store crawler progress in a separate SQLite database.
+        self.db_path = self.config.save_file + ".sqlite3"
+
+        # If restarting from scratch, delete the previous crawl progress.
+        if restart and os.path.exists(self.db_path):
+            os.remove(self.db_path)
+
+        # Allow worker threads to access the database connection.
+        # Database operations will be synchronized using an RLock.
+        self.save = sqlite3.connect(
+            self.db_path,
+            check_same_thread=False
+        )
+
+        # Store each discovered URL and whether it has been downloaded.
+        # The URL hash serves as a unique key to prevent duplicates.
+        self.save.execute("""
+            CREATE TABLE IF NOT EXISTS frontier (
+                urlhash TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                completed INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        self.save.commit()
         
-        if not os.path.exists(self.config.save_file) and not restart:
-            # Save file does not exist, but request to load save.
-            self.logger.info(
-                f"Did not find save file {self.config.save_file}, "
-                f"starting from seed.")
-        elif os.path.exists(self.config.save_file) and restart:
-            # Save file does exists, but request to start from seed.
-            self.logger.info(
-                f"Found save file {self.config.save_file}, deleting it.")
-            os.remove(self.config.save_file)
-        # Load existing save file, or create one if it does not exist.
-        self.save = shelve.open(self.config.save_file)
         if restart:
             for url in self.config.seed_urls:
                 self.add_url(url)
