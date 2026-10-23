@@ -179,14 +179,22 @@ def is_valid(url):
             return False
 
         # Avoid calendar traps caused by endless date navigation.
-        calendar_keywords = {"calendar", "calendars"}
+        calendar_keywords = {"calendar", "calendars", "events"}
         
         if any(part in calendar_keywords for part in parsed.path.lower().split("/")):
             if re.search(r"/\d{4}/\d{1,2}(?:/|$)", parsed.path):
                 return False
+
+            if re.search(r"/day/\d{4}-\d{2}-\d{2}(?:/|$)", parsed.path):
+                return False
+
+            if re.search(r"/\d{4}-\d{2}(?:-\d{2})?(?:/|$)", parsed.path):
+                return False
         
-            if any(key.lower() in {"year", "month", "date"}
-                   for key, value in parse_qsl(parsed.query)):
+            if any(key.lower() in  {
+                "year", "month", "date", "tribe-bar-date",
+                "ical", "outlook-ical", "eventdisplay"
+            } for key, value in parse_qsl(parsed.query)):
                 return False
 
         # Avoid excessive pagination that may indicate a crawler trap.
@@ -210,6 +218,11 @@ def is_valid(url):
         if any(part in {"login", "signin", "auth", "oauth2"}
             for part in parsed.path.lower().split("/")):
                 return False
+
+        # Avoid wiki version history traps.
+        if any(key.lower() in {"version", "action", "format", "precision"}
+               for key, value in parse_qsl(parsed.query)):
+            return False
 
         # Skip non-HTML files such as images, documents, archives,
         # and other file types that are not useful for our crawler.
