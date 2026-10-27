@@ -133,7 +133,10 @@ def extract_next_links(url, resp):
     
     for link in links:
         # Convert relative URLs to absolute URLs using the current page's URL.
-        absolute_url = urljoin(resp.url, link["href"])
+        try:
+            absolute_url = urljoin(resp.url, link["href"])
+        except ValueError:
+            continue
 
         # Remove fragments (#section) to avoid treating the same page as different URLs.
         absolute_url = urldefrag(absolute_url)[0]
@@ -224,6 +227,21 @@ def is_valid(url):
                for key, value in parse_qsl(parsed.query)):
             return False
 
+        # Avoid common UI navigation and media-manager traps.
+        trap_params = {
+            "tab_details",
+            "tab_files",
+            "do",
+            "image",
+            "ns",
+            "version",
+            "precision",
+        }
+        
+        if any(key.lower() in trap_params
+               for key, value in parse_qsl(parsed.query)):
+            return False
+
         # Skip non-HTML files such as images, documents, archives,
         # and other file types that are not useful for our crawler.
         return not re.match(
@@ -235,6 +253,10 @@ def is_valid(url):
             + r"|epub|dll|cnf|tgz|sha1"
             + r"|thmx|mso|arff|rtf|jar|csv"
             + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower())
+
+        if any(part in {"zip-attachment", "raw-attachment", "attachment"}
+            for part in parsed.path.lower().split("/")):
+                return False
 
     # Reject malformed URLs instead of interrupting the crawler.
     except (TypeError, ValueError):
