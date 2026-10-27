@@ -234,6 +234,7 @@ def is_valid(url):
             "do",
             "image",
             "ns",
+            "idx",
             "version",
             "precision",
         }
