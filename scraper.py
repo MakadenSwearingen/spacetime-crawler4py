@@ -1,4 +1,5 @@
 import re
+import sqlite3
 from collections import Counter
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin, urldefrag, parse_qsl
@@ -30,17 +31,45 @@ STOP_WORDS = {
     "yourselves"
 }
 
-visited_pages = set()
-word_counts = Counter()
-longest_page = ("", 0)
-subdomain_counts = Counter()
+# Report statistics are saved on disk (not in memory) so they survive
+# Ctrl+C, crashes, and resuming the crawl without --restart.
+#   pages: one row per unique (defragmented) URL, with its word count.
+#   words: running count of every non-stop word across all pages.
+STATS_DB = "crawl_stats.sqlite3"
+stats_db = sqlite3.connect(STATS_DB, check_same_thread=False)
+stats_db.execute("""
+    CREATE TABLE IF NOT EXISTS pages (
+        url TEXT PRIMARY KEY,
+        hostname TEXT,
+        word_count INTEGER NOT NULL
+    )
+""")
+stats_db.execute("""
+    CREATE TABLE IF NOT EXISTS words (
+        word TEXT PRIMARY KEY,
+        count INTEGER NOT NULL
+    )
+""")
+stats_db.commit()
 
 # Pages no larger than 5 MB.
 MAX_CONTENT_BYTES = 5242880 
 
+# Pages with fewer visible words than this are "low-information": they still
+# count as unique pages, but we don't index their words or follow their links.
+MIN_WORD_COUNT = 50
+
 
 def scraper(url, resp):
-    global visited_pages, word_counts, longest_page, subdomain_counts
+    # Redirect (3xx): return the target URL so the crawler downloads
+    # and indexes the redirected page on its own.
+    if 300 <= resp.status < 400 and resp.raw_response is not None:
+        location = resp.raw_response.headers.get("Location")
+        if location:
+            target = urldefrag(urljoin(url, location))[0]
+            if is_valid(target):
+                return {target}
+        return set()
 
     # Only process successfully downloaded pages.
     if resp.status == 200 and resp.raw_response is not None:
@@ -51,6 +80,19 @@ def scraper(url, resp):
         # It cannot know the page's content size because it only receives a URL. 
         # That why we put it directly in the crawler.
         if not raw_content or len(raw_content) > MAX_CONTENT_BYTES:
+            return set()
+
+        # Only HTML pages hold the text we index. Skip binaries/data files
+        # (zips, .war, source code, etc.) whose URL had no telltale extension.
+        content_type = resp.raw_response.headers.get("Content-Type", "").lower()
+        if content_type and "html" not in content_type:
+            return set()
+
+        # If the server followed a redirect, the content belongs to the final
+        # URL, so that is the page we count. Skip it if the redirect led
+        # somewhere we shouldn't crawl (outside our domains, a login page...).
+        page_url = urldefrag(resp.raw_response.url)[0]
+        if not is_valid(page_url):
             return set()
 
         # Extract links only from valid responses
@@ -68,31 +110,33 @@ def scraper(url, resp):
         # This version: words = re.findall(r"\b[a-zA-Z]+\b", text.lower()) is the old version that doesn't catch apostrophes.
         #The a-z text means: Find words made of letters, while allowing an apostrophe inside a word.
         words = re.findall(r"\b[a-zA-Z]+(?:'[a-zA-Z]+)?\b", text.lower())
+        low_information = len(words) < MIN_WORD_COUNT
 
-        # Remove URL fragment to identify unique pages
-        page_url = urldefrag(resp.url)[0]
+        # Record this page; the URL primary key ignores pages we've
+        # already counted (e.g. reached again through a redirect).
+        cursor = stats_db.execute(
+            "INSERT OR IGNORE INTO pages (url, hostname, word_count) VALUES (?, ?, ?)",
+            (page_url, urlparse(page_url).hostname, len(words))
+        )
 
-        # Skip statistics for pages we've already processed
-        if page_url in visited_pages:
-            return {link for link in links if is_valid(link)}
+        # Count words, ignoring stop words, only for new pages with real content.
+        if cursor.rowcount == 1 and not low_information:
+            counts = Counter(word for word in words if word not in STOP_WORDS)
+            stats_db.executemany(
+                "INSERT OR IGNORE INTO words (word, count) VALUES (?, 0)",
+                ((word,) for word in counts)
+            )
+            stats_db.executemany(
+                "UPDATE words SET count = count + ? WHERE word = ?",
+                ((count, word) for word, count in counts.items())
+            )
 
-        # Record this unique page
-        visited_pages.add(page_url)
+        # The page and its words are saved together in one commit.
+        stats_db.commit()
 
-        # Check if this is the longest page
-        word_count = len(words)
-        if word_count > longest_page[1]:
-            longest_page = (resp.url, word_count)
-
-        # Count words, ignoring stop words
-        for word in words:
-            if word not in STOP_WORDS:
-                word_counts[word] += 1
-
-        # Count ics.uci.edu subdomains
-        hostname = urlparse(resp.url).hostname
-        if hostname and hostname.endswith(".ics.uci.edu"):
-            subdomain_counts[hostname] += 1
+        # Don't follow links out of low-information pages (e.g. empty calendar days).
+        if low_information:
+            return set()
 
         return {link for link in links if is_valid(link)}
     
@@ -133,8 +177,10 @@ def extract_next_links(url, resp):
     
     for link in links:
         # Convert relative URLs to absolute URLs using the current page's URL.
+        # raw_response.url is the final URL after any redirect, which is what
+        # relative links on the page are relative to.
         try:
-            absolute_url = urljoin(resp.url, link["href"])
+            absolute_url = urljoin(resp.raw_response.url, link["href"])
         except ValueError:
             continue
 
@@ -152,6 +198,10 @@ def is_valid(url):
     # There are already some conditions that return False.
     try:
         parsed = urlparse(url)
+
+        # Only send the server plain ASCII URLs (no Unicode or whitespace garbage).
+        if not url.isascii() or re.search(r"\s", url):
+            return False
 
         # Only allow HTTP and HTTPS URLs.
         if parsed.scheme not in set(["http", "https"]):
@@ -217,8 +267,9 @@ def is_valid(url):
         if len(url) > 2048:
             return False
 
-        # Avoid URLs that would require user login/authentication.
-        if any(part in {"login", "signin", "auth", "oauth2"}
+        # Avoid URLs that would require user login/authentication
+        # (including WordPress's wp-login.php, used across several subdomains).
+        if any(part in {"login", "signin", "auth", "oauth2", "wp-login.php"}
             for part in parsed.path.lower().split("/")):
                 return False
 
@@ -243,6 +294,12 @@ def is_valid(url):
                for key, value in parse_qsl(parsed.query)):
             return False
 
+        # Avoid wiki file attachments (zips, raw downloads). This must come
+        # before the final return below, otherwise it never runs.
+        if any(part in {"zip-attachment", "raw-attachment", "attachment"}
+            for part in parsed.path.lower().split("/")):
+                return False
+
         # Skip non-HTML files such as images, documents, archives,
         # and other file types that are not useful for our crawler.
         return not re.match(
@@ -253,32 +310,53 @@ def is_valid(url):
             + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
             + r"|epub|dll|cnf|tgz|sha1"
             + r"|thmx|mso|arff|rtf|jar|csv"
+            + r"|war|apk|mpg|ppsx|pps|class|npy|h5|mol|sdf|smi"
             + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower())
-
-        if any(part in {"zip-attachment", "raw-attachment", "attachment"}
-            for part in parsed.path.lower().split("/")):
-                return False
 
     # Reject malformed URLs instead of interrupting the crawler.
     except (TypeError, ValueError):
         return False
 
 
+def reset_statistics():
+    # Clear saved statistics when the crawl restarts from scratch (--restart).
+    stats_db.execute("DELETE FROM pages")
+    stats_db.execute("DELETE FROM words")
+    stats_db.commit()
 
 
 def print_statistics():
+    # Answers the four report questions from the saved statistics.
+    unique_pages = stats_db.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
+    longest_page = stats_db.execute(
+        "SELECT url, word_count FROM pages ORDER BY word_count DESC LIMIT 1"
+    ).fetchone() or ("", 0)
+    common_words = stats_db.execute(
+        "SELECT word, count FROM words ORDER BY count DESC LIMIT 50"
+    ).fetchall()
+    subdomains = stats_db.execute(
+        "SELECT hostname, COUNT(*) FROM pages WHERE hostname LIKE '%.ics.uci.edu' "
+        "GROUP BY hostname ORDER BY hostname"
+    ).fetchall()
+
     print("\n===== PAGE STATISTICS =====")
 
-    print("Unique pages:", len(visited_pages))
+    print("Unique pages:", unique_pages)
 
     print("\nLongest page:")
     print("URL:", longest_page[0])
     print("Word count:", longest_page[1])
 
     print("\n50 most common words:")
-    for word, count in word_counts.most_common(50):
+    for word, count in common_words:
         print(word, count)
 
-    print("\nics.uci.edu subdomains:")
-    for subdomain in sorted(subdomain_counts):
-        print(subdomain, subdomain_counts[subdomain])
+    # Lines are "URL, number" as the assignment asks, in alphabetical order.
+    print("\nics.uci.edu subdomains:", len(subdomains))
+    for subdomain, count in subdomains:
+        print(f"http://{subdomain}, {count}")
+
+
+# Run "python scraper.py" at any time (even after Ctrl+C) to print the report.
+if __name__ == "__main__":
+    print_statistics()

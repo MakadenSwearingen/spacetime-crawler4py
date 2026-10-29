@@ -3,7 +3,7 @@ import sqlite3
 from threading import RLock
 
 from utils import get_logger, get_urlhash, normalize
-from scraper import is_valid
+from scraper import is_valid, reset_statistics
 
 class Frontier(object):
     def __init__(self, config, restart):
@@ -20,6 +20,10 @@ class Frontier(object):
         # If restarting from scratch, delete the previous crawl progress.
         if restart and os.path.exists(self.db_path):
             os.remove(self.db_path)
+
+        # Restarting from scratch also clears the saved report statistics.
+        if restart:
+            reset_statistics()
 
         # Allow worker threads to access the database connection.
         # Database operations will be synchronized using an RLock.
@@ -76,7 +80,10 @@ class Frontier(object):
     def get_tbd_url(self):
         with self.lock:
             try:
-                return self.to_be_downloaded.pop()
+                # Take the oldest URL first (breadth-first), so all four seed
+                # domains are crawled from the start instead of one domain
+                # being explored to the bottom before the others are reached.
+                return self.to_be_downloaded.pop(0)
             except IndexError:
                 return None
 
