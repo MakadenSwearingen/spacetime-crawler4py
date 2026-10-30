@@ -311,6 +311,9 @@ def is_valid(url):
             + r"|epub|dll|cnf|tgz|sha1"
             + r"|thmx|mso|arff|rtf|jar|csv"
             + r"|war|apk|mpg|ppsx|pps|class|npy|h5|mol|sdf|smi"
+            # Virtual machine images are several GB each; downloading one
+            # ran the crawler out of memory and got it killed.
+            + r"|ova|vmdk|vdi|qcow2"
             + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower())
 
     # Reject malformed URLs instead of interrupting the crawler.
